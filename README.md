@@ -11,13 +11,21 @@ Responsive web taxi navigation game. Pick **Red / Green / Blue** by service regi
 
 See [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md) for the full plan.
 
-## Status
-
-Repo scaffolded. Game implementation coming next.
-
-## Dev (planned)
+## Dev
 
 ```bash
-bun install
-bun run dev
+npm install
+npm run dev
 ```
+
+```bash
+npm run typecheck
+npm run build
+```
+
+## Status
+
+- Vite + React + TypeScript scaffold
+- Sim core: graph, legal exits, shortest path, meter fare, scoring
+- Playable **Red** mode on a tiny sample Kowloon/harbour graph (schematic map)
+- Green / Blue modes listed, locked until region content ships

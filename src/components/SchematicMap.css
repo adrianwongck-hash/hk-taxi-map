@@ -1,0 +1,8 @@
+.schematic-map {
+  width: 100%;
+  height: auto;
+  display: block;
+  background: var(--map-bg);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
