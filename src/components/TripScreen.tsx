@@ -13,8 +13,7 @@ import {
   type TripScore,
 } from "../sim";
 import type { RoadGraph } from "../sim/types";
-import { DriveView } from "./DriveView";
-import { SchematicMap } from "./SchematicMap";
+import { MapDriveView } from "./MapDriveView";
 import "./TripScreen.css";
 
 interface Props {
@@ -161,17 +160,20 @@ export function TripScreen({ mode, graph, onExit }: Props) {
         </span>
       </p>
 
-      <DriveView
+      <MapDriveView
         graph={graph}
         currentNode={currentNode}
+        destinationNode={trip.destination.nodeId}
         modeColor={modeInfo.color}
         destinationLabel={`${trip.destination.nameEn} · ${trip.destination.nameZh}`}
         choices={choices}
         arrivedVia={arrivedEdge}
+        traversed={playerEdges}
         moving={moving}
         moveProgress={moveProgress}
         activeEdge={activeEdge}
         phase={phase}
+        optimalEdgeIds={trip.optimal.edgeIds}
         onChoose={choose}
       />
 
@@ -180,14 +182,6 @@ export function TripScreen({ mode, graph, onExit }: Props) {
           <h2 className={`trip__grade trip__grade--${score.grade}`}>
             {score.grade.toUpperCase()}
           </h2>
-          <SchematicMap
-            graph={graph}
-            currentNode={currentNode}
-            destinationNode={trip.destination.nodeId}
-            traversed={playerEdges}
-            highlightOptimal={trip.optimal.edgeIds}
-            modeColor={modeInfo.color}
-          />
           <dl className="trip__stats">
             <div>
               <dt>Your distance</dt>
