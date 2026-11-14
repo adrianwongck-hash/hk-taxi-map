@@ -25,7 +25,7 @@ npm run build
 
 ## Status
 
-- Vite + React + TypeScript scaffold
-- Sim core: graph, legal exits, shortest path, meter fare, scoring
-- Playable **Red** mode on a tiny sample Kowloon/harbour graph (schematic map)
-- Green / Blue modes listed, locked until region content ships
+- Playable **Red** mode on a real HK basemap (heading-up MapLibre)
+- ~190 Red landmarks (hospitals, schools, estates, MTR, malls, tourist, streets)
+- Green / Blue: **To be updated**
+- Regenerate landmarks: `npm run fetch:red-landmarks` (see [docs/LANDMARKS.md](docs/LANDMARKS.md))

@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "build:pages": "tsc -b && vite build --mode pages",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "fetch:red-landmarks": "node scripts/fetch-red-landmarks.mjs"
   },
   "dependencies": {
     "maplibre-gl": "^6.18.0",

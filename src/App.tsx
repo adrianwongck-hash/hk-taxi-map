@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ModeSelect } from "./components/ModeSelect";
 import { TripScreen } from "./components/TripScreen";
-import { sampleGraph } from "./data/sampleGraph";
+import { redGraph } from "./data/redGraph";
 import type { TaxiMode } from "./sim/types";
 import "./App.css";
 
@@ -20,7 +20,7 @@ export default function App() {
     <main className="app">
       <TripScreen
         mode={mode}
-        graph={sampleGraph}
+        graph={redGraph}
         onExit={() => setMode(null)}
       />
     </main>

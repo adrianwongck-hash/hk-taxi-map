@@ -54,7 +54,7 @@ function ModeCard({
       </span>
       <span className="mode-card__blurb">{mode.blurb}</span>
       <span className="mode-card__cta">
-        {mode.playable ? "Play" : "Coming soon"}
+        {mode.playable ? "Play" : "To be updated"}
       </span>
     </button>
   );
