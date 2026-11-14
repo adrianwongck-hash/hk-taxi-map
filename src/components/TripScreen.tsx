@@ -163,6 +163,7 @@ export function TripScreen({ mode, graph, onExit }: Props) {
 
       <DriveView
         graph={graph}
+        currentNode={currentNode}
         modeColor={modeInfo.color}
         destinationLabel={`${trip.destination.nameEn} · ${trip.destination.nameZh}`}
         choices={choices}

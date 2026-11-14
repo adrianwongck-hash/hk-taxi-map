@@ -43,6 +43,30 @@ export function classifyTurn(relativeDeg: number): TurnKind {
   return relativeDeg < 0 ? "left" : "right";
 }
 
+export function turnLabel(kind: TurnKind): string {
+  switch (kind) {
+    case "left":
+      return "Turn left";
+    case "slight-left":
+      return "Bear left";
+    case "straight":
+      return "Go straight";
+    case "slight-right":
+      return "Bear right";
+    case "right":
+      return "Turn right";
+    case "uturn":
+      return "U-turn";
+  }
+}
+
+/** 8-point compass from bearing degrees. */
+export function compassLabel(bearing: number): string {
+  const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
+  const i = Math.round((((bearing % 360) + 360) % 360) / 45) % 8;
+  return dirs[i]!;
+}
+
 export function headingAtNode(
   graph: RoadGraph,
   arrivedVia: GraphEdge | null,
