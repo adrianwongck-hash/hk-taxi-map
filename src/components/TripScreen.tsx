@@ -63,13 +63,21 @@ export function TripScreen({ mode, graph, onExit }: Props) {
     };
   }, []);
 
-  if (!trip || !currentNode) {
+  if (!trip) {
     return (
       <div className="trip">
         <p>No playable trip for this mode yet.</p>
         <button type="button" onClick={onExit}>
           Back
         </button>
+      </div>
+    );
+  }
+
+  if (!currentNode) {
+    return (
+      <div className="trip">
+        <p>Loading trip…</p>
       </div>
     );
   }

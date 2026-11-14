@@ -4,6 +4,7 @@ import {
   Map as MapLibreMap,
   NavigationControl,
   type GeoJSONSource,
+  type StyleSpecification,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
@@ -35,7 +36,37 @@ interface Props {
   onChoose: (edge: GraphEdge) => void;
 }
 
-const STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
+/** Free raster basemap — no API key (Carto Voyager now watermarks without one). */
+const MAP_STYLE: StyleSpecification = {
+  version: 8,
+  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+  sources: {
+    esri: {
+      type: "raster",
+      tiles: [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+      ],
+      tileSize: 256,
+      attribution:
+        "Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom",
+    },
+  },
+  layers: [
+    {
+      id: "esri",
+      type: "raster",
+      source: "esri",
+    },
+  ],
+};
+
+function placeLabel(graph: RoadGraph, nodeId: NodeId): string {
+  const node = graph.nodes[nodeId];
+  if (node?.nameEn && !/^n\d+$/i.test(node.nameEn)) return node.nameEn;
+  const lm = graph.landmarks.find((l) => l.nodeId === nodeId);
+  if (lm) return lm.nameEn;
+  return "ahead";
+}
 
 export function MapDriveView({
   graph,
@@ -70,12 +101,13 @@ export function MapDriveView({
         const rel = relativeTurnDeg(heading, bearing);
         const kind = classifyTurn(rel);
         const toward = graph.nodes[edge.to];
+        const towardEn = placeLabel(graph, edge.to);
         return {
           edge,
           rel,
           kind,
           bearing,
-          towardEn: toward?.nameEn ?? edge.to,
+          towardEn,
           towardZh: toward?.nameZh,
           action: turnLabel(kind),
           compass: compassLabel(bearing),
@@ -112,7 +144,7 @@ export function MapDriveView({
 
     const map = new MapLibreMap({
       container: containerRef.current,
-      style: STYLE_URL,
+      style: MAP_STYLE,
       center: taxiLngLat,
       zoom: 15.2,
       pitch: 0,
@@ -135,8 +167,10 @@ export function MapDriveView({
       .addTo(map);
     taxiMarkerRef.current = marker;
 
+    const resize = () => map.resize();
     map.on("load", () => {
       readyRef.current = true;
+      resize();
       ensureLayers(map, graph);
       updateLayers(map, graph, {
         traversed,
@@ -149,8 +183,15 @@ export function MapDriveView({
         optimalEdgeIds: phase === "debrief" ? optimalEdgeIds : [],
       });
     });
+    map.on("error", (e) => {
+      console.error("MapLibre error", e.error);
+    });
+    // Layout can settle after first paint
+    requestAnimationFrame(resize);
+    window.addEventListener("resize", resize);
 
     return () => {
+      window.removeEventListener("resize", resize);
       marker.remove();
       map.remove();
       mapRef.current = null;
