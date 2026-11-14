@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MODES } from "../game/modes";
 import {
   calculateFare,
@@ -13,6 +13,7 @@ import {
   type TripScore,
 } from "../sim";
 import type { RoadGraph } from "../sim/types";
+import { DriveView } from "./DriveView";
 import { SchematicMap } from "./SchematicMap";
 import "./TripScreen.css";
 
@@ -37,6 +38,10 @@ export function TripScreen({ mode, graph, onExit }: Props) {
   const [playerEdges, setPlayerEdges] = useState<EdgeId[]>([]);
   const [phase, setPhase] = useState<Phase>("drive");
   const [score, setScore] = useState<TripScore | null>(null);
+  const [moving, setMoving] = useState(false);
+  const [moveProgress, setMoveProgress] = useState(0);
+  const [activeEdge, setActiveEdge] = useState<GraphEdge | null>(null);
+  const animRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!trip) {
@@ -48,7 +53,16 @@ export function TripScreen({ mode, graph, onExit }: Props) {
     setPlayerEdges([]);
     setPhase("drive");
     setScore(null);
+    setMoving(false);
+    setMoveProgress(0);
+    setActiveEdge(null);
   }, [trip]);
+
+  useEffect(() => {
+    return () => {
+      if (animRef.current !== null) cancelAnimationFrame(animRef.current);
+    };
+  }, []);
 
   if (!trip || !currentNode) {
     return (
@@ -71,29 +85,51 @@ export function TripScreen({ mode, graph, onExit }: Props) {
       .map((id) => graph.edges[id])
       .filter((e): e is GraphEdge => e !== undefined),
   );
+  const arrivedEdge = arrivedVia ? (graph.edges[arrivedVia] ?? null) : null;
   const choices: GraphEdge[] =
-    phase === "drive"
+    phase === "drive" && !moving
       ? outgoingEdges(graph, mode, currentNode, arrivedVia)
       : [];
 
   function choose(edge: GraphEdge) {
     const active = trip;
-    if (!active) return;
+    if (!active || moving) return;
+
     const nextEdges = [...playerEdges, edge.id];
     setPlayerEdges(nextEdges);
-    setCurrentNode(edge.to);
-    setArrivedVia(edge.id);
+    setActiveEdge(edge);
+    setMoving(true);
+    setMoveProgress(0);
 
-    if (edge.to === active.destination.nodeId) {
-      const result = scoreTrip(
-        graph,
-        mode,
-        nextEdges,
-        active.optimal.edgeIds,
-      );
-      setScore(result);
-      setPhase("debrief");
-    }
+    const durationMs = Math.min(2800, Math.max(900, edge.lengthM * 0.9));
+    const start = performance.now();
+
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / durationMs);
+      const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      setMoveProgress(eased);
+      if (t < 1) {
+        animRef.current = requestAnimationFrame(tick);
+      } else {
+        animRef.current = null;
+        setCurrentNode(edge.to);
+        setArrivedVia(edge.id);
+        setMoving(false);
+        setMoveProgress(1);
+        setActiveEdge(null);
+        if (edge.to === active.destination.nodeId) {
+          const result = scoreTrip(
+            graph,
+            mode,
+            nextEdges,
+            active.optimal.edgeIds,
+          );
+          setScore(result);
+          setPhase("debrief");
+        }
+      }
+    };
+    animRef.current = requestAnimationFrame(tick);
   }
 
   function nextTrip() {
@@ -101,7 +137,7 @@ export function TripScreen({ mode, graph, onExit }: Props) {
   }
 
   return (
-    <div className="trip">
+    <div className="trip trip--drive">
       <header className="trip__hud">
         <button type="button" className="trip__back" onClick={onExit}>
           Modes
@@ -125,40 +161,32 @@ export function TripScreen({ mode, graph, onExit }: Props) {
         </span>
       </p>
 
-      <SchematicMap
+      <DriveView
         graph={graph}
-        currentNode={currentNode}
-        destinationNode={trip.destination.nodeId}
-        traversed={playerEdges}
-        highlightOptimal={phase === "debrief" ? trip.optimal.edgeIds : []}
         modeColor={modeInfo.color}
+        destinationLabel={`${trip.destination.nameEn} · ${trip.destination.nameZh}`}
+        choices={choices}
+        arrivedVia={arrivedEdge}
+        moving={moving}
+        moveProgress={moveProgress}
+        activeEdge={activeEdge}
+        phase={phase}
+        onChoose={choose}
       />
-
-      {phase === "drive" && (
-        <section className="trip__choices">
-          <h2>Choose a legal road</h2>
-          <div className="trip__choice-list">
-            {choices.map((edge) => (
-              <button
-                key={edge.id}
-                type="button"
-                className="trip__choice"
-                onClick={() => choose(edge)}
-              >
-                <strong>{edge.nameEn}</strong>
-                {edge.nameZh ? <span>{edge.nameZh}</span> : null}
-                <em>{(edge.lengthM / 1000).toFixed(2)} km</em>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
 
       {phase === "debrief" && score && (
         <section className="trip__debrief">
           <h2 className={`trip__grade trip__grade--${score.grade}`}>
             {score.grade.toUpperCase()}
           </h2>
+          <SchematicMap
+            graph={graph}
+            currentNode={currentNode}
+            destinationNode={trip.destination.nodeId}
+            traversed={playerEdges}
+            highlightOptimal={trip.optimal.edgeIds}
+            modeColor={modeInfo.color}
+          />
           <dl className="trip__stats">
             <div>
               <dt>Your distance</dt>

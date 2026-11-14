@@ -1,0 +1,182 @@
+.drive {
+  position: relative;
+  flex: 1;
+  min-height: min(62vh, 520px);
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #1a1a1a;
+  isolation: isolate;
+}
+
+.drive__canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+.drive__dest {
+  position: absolute;
+  top: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  backdrop-filter: blur(6px);
+  max-width: min(90%, 22rem);
+  text-align: center;
+  pointer-events: none;
+}
+
+.drive__dest span {
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.drive__dest strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.drive__arrows {
+  position: absolute;
+  inset: auto 0 1rem 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 0.55rem;
+  padding: 0 0.75rem;
+  flex-wrap: wrap;
+  pointer-events: none;
+}
+
+.drive__arrow {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  min-width: 4.5rem;
+  max-width: 7.5rem;
+  padding: 0.55rem 0.45rem 0.5rem;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.drive__arrow:hover,
+.drive__arrow:focus-visible {
+  background: rgba(20, 20, 20, 0.8);
+  border-color: #fff;
+  outline: none;
+  transform: translateY(-2px);
+}
+
+.drive__arrow-glyph {
+  width: 1.85rem;
+  height: 1.85rem;
+  display: block;
+  background: #fff;
+  clip-path: polygon(50% 0%, 100% 70%, 65% 70%, 65% 100%, 35% 100%, 35% 70%, 0% 70%);
+}
+
+.drive__arrow-glyph--left {
+  transform: rotate(-90deg);
+}
+.drive__arrow-glyph--slight-left {
+  transform: rotate(-45deg);
+}
+.drive__arrow-glyph--straight {
+  transform: none;
+}
+.drive__arrow-glyph--slight-right {
+  transform: rotate(45deg);
+}
+.drive__arrow-glyph--right {
+  transform: rotate(90deg);
+}
+.drive__arrow-glyph--uturn {
+  clip-path: none;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  border-left-color: transparent;
+  background: transparent;
+  position: relative;
+}
+.drive__arrow-glyph--uturn::after {
+  content: "";
+  position: absolute;
+  left: -0.15rem;
+  top: 55%;
+  border: 0.35rem solid transparent;
+  border-right-color: #fff;
+}
+
+.drive__arrow-name {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.drive__arrow-zh {
+  font-size: 0.68rem;
+  opacity: 0.8;
+  text-align: center;
+}
+
+.drive__arrow--straight {
+  order: 0;
+}
+.drive__arrow--slight-left,
+.drive__arrow--left,
+.drive__arrow--uturn {
+  order: -1;
+}
+.drive__arrow--slight-right,
+.drive__arrow--right {
+  order: 1;
+}
+
+.drive__moving {
+  position: absolute;
+  bottom: 1.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 0.85rem;
+  backdrop-filter: blur(6px);
+}
+
+@media (min-width: 720px) {
+  .drive {
+    min-height: min(70vh, 640px);
+  }
+
+  .drive__arrow {
+    min-width: 5.5rem;
+    max-width: 9rem;
+    padding: 0.7rem 0.6rem 0.6rem;
+  }
+
+  .drive__arrow-glyph {
+    width: 2.15rem;
+    height: 2.15rem;
+  }
+}
