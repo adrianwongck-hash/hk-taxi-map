@@ -9,7 +9,9 @@
     "build:pages": "tsc -b && vite build --mode pages",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
-    "fetch:red-landmarks": "node scripts/fetch-red-landmarks.mjs"
+    "fetch:red-landmarks": "node scripts/fetch-red-landmarks.mjs",
+    "build:red-highways": "node scripts/build-red-highway-graph.mjs",
+    "build:red-highways:cache": "node scripts/build-red-highway-graph.mjs --cache-only"
   },
   "dependencies": {
     "maplibre-gl": "^6.18.0",
@@ -20,6 +22,8 @@
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.1.0",
+    "osm-pbf-parser": "^2.3.0",
+    "through2": "^5.0.12",
     "typescript": "~5.9.3",
     "vite": "^7.2.2"
   }

@@ -26,6 +26,6 @@ npm run build
 ## Status
 
 - Playable **Red** mode on a real HK basemap (heading-up MapLibre)
-- ~190 Red landmarks (hospitals, schools, estates, MTR, malls, tourist, streets)
+- Full OSM highway graph for HKI + Kowloon (~36k nodes) + ~170 landmarks
 - Green / Blue: **To be updated**
-- Regenerate landmarks: `npm run fetch:red-landmarks` (see [docs/LANDMARKS.md](docs/LANDMARKS.md))
+- Rebuild map data: see [docs/LANDMARKS.md](docs/LANDMARKS.md) (`npm run build:red-highways`)

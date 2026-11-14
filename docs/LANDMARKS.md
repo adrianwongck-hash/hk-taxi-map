@@ -1,39 +1,39 @@
-# Red landmark pool — how it is generated
+# Red map data — highways + landmarks
 
-Green / Blue modes stay **To be updated**. Red (HKI + Kowloon) uses a generated pool.
+Green / Blue modes stay **To be updated**. Red uses a **full OSM highway graph** for HKI + Kowloon plus a curated landmark seed.
 
 ## Pipeline
 
 ```bash
-npm run fetch:red-landmarks           # try Overpass, merge with seed
-npm run fetch:red-landmarks -- --seed-only   # curated seed only (offline)
+# 1) Download HK extract once (~36MB)
+curl.exe -L -o src/data/generated/hong-kong.osm.pbf ^
+  https://download.geofabrik.de/asia/china/hong-kong-latest.osm.pbf
+
+# 2) Build routable graph + snap landmarks
+npm run build:red-highways
 ```
 
-Output: `src/data/generated/redGraph.json` (imported by `src/data/redGraph.ts`).
+Output: `src/data/generated/redGraph.json` → `src/data/redGraph.ts`.
 
-### Sources
+### What the builder does
 
-1. **Curated seed** (`scripts/red-landmark-seed.mjs`) — hospitals, schools/universities, tourist spots, malls, MTR exits, public/private estates, named street drop-offs.
-2. **OpenStreetMap Overpass** (when reachable) — same categories inside an HKI+Kowloon bbox, capped per category, merged by name.
+1. Read Geofabrik PBF; keep highways in the Red bbox (motorway→residential + links).
+2. Build directed edges (one-ways / roundabouts respected).
+3. Keep the largest connected component; simplify degree-2 chains.
+4. Snap seed landmarks to the nearest junction (short spur only if >45 m away).
 
-### How a POI becomes a playable destination
+### Landmark sources
 
-1. Find the nearest **corridor skeleton** node (Nathan Rd / harbour / Island north anchors, etc.).
-2. Add a **spur node** at the POI’s real lat/lng.
-3. Add bidirectional **spur edges** (access road) to that anchor so Dijkstra can route to it.
-4. Register a **landmark** pointing at the spur node.
+Curated seed (`scripts/red-landmark-seed.mjs`): hospitals, schools/unis, tourist spots, malls, MTR exits, estates, named street drop-offs.
 
-Trip picker (`generateTrip`) randomly samples landmark pairs with shortest path ≥ 800 m.
+Optional older Overpass POI merge: `npm run fetch:red-landmarks` (not required once highways are built).
 
-## Growing the pool further
+Trip picker (`generateTrip`) randomly samples landmark pairs with shortest path ≥ 800 m (heap Dijkstra).
+
+## Growing further
 
 | Need | Approach |
 |------|----------|
-| More hospitals / schools / malls | Expand seed list, or re-run Overpass when API is healthy |
-| Public estates | OSM `landuse=residential` + `building=apartments` with `name`; HK Housing Authority estate lists |
-| Private estates | Named complexes in OSM / Centamap-style gazetteers (manual or licensed data) |
-| Streets | Named `highway=*` midpoints or junctions as drop-offs |
-| Tourist spots | OSM `tourism=*`, plus HKTB lists folded into the seed |
-| True street-following | Replace spur-to-skeleton with a full OSM highway graph for Red |
-
-Private single houses are usually **not** good taxi destinations (no stable public name) — prefer named blocks/estates.
+| More POIs | Expand `red-landmark-seed.mjs`, re-run `build:red-highways` |
+| Turn restrictions | Import OSM `type=restriction` relations into `turnRestrictions` |
+| NT / Lantau | Same pipeline with Green/Blue bboxes + seeds |

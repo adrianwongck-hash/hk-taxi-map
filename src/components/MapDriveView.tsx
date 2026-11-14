@@ -261,24 +261,8 @@ export function MapDriveView({
   );
 }
 
-function ensureLayers(map: MapLibreMap, graph: RoadGraph) {
-  if (!map.getSource("trip-network")) {
-    map.addSource("trip-network", {
-      type: "geojson",
-      data: networkGeoJson(graph),
-    });
-    map.addLayer({
-      id: "trip-network-line",
-      type: "line",
-      source: "trip-network",
-      paint: {
-        "line-color": "#6b7280",
-        "line-width": 4,
-        "line-opacity": 0.55,
-      },
-    });
-  }
-
+function ensureLayers(map: MapLibreMap, _graph: RoadGraph) {
+  // Basemap already shows real streets — only overlay route/choices (full highway graph is huge).
   if (!map.getSource("trip-player")) {
     map.addSource("trip-player", {
       type: "geojson",
@@ -378,7 +362,6 @@ function updateLayers(
     optimalEdgeIds: string[];
   },
 ) {
-  setSource(map, "trip-network", networkGeoJson(graph));
   setSource(map, "trip-player", edgesGeoJson(graph, state.traversed));
   setSource(map, "trip-optimal", edgesGeoJson(graph, state.optimalEdgeIds));
 
@@ -447,31 +430,6 @@ function setSource(
 
 function emptyFc(): GeoJSON.FeatureCollection {
   return { type: "FeatureCollection", features: [] };
-}
-
-function networkGeoJson(graph: RoadGraph): GeoJSON.FeatureCollection {
-  const seen = new Set<string>();
-  const features: GeoJSON.Feature[] = [];
-  for (const e of Object.values(graph.edges)) {
-    const key = e.from < e.to ? `${e.from}|${e.to}` : `${e.to}|${e.from}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const a = graph.nodes[e.from];
-    const b = graph.nodes[e.to];
-    if (!a || !b) continue;
-    features.push({
-      type: "Feature",
-      properties: {},
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [a.lng, a.lat],
-          [b.lng, b.lat],
-        ],
-      },
-    });
-  }
-  return { type: "FeatureCollection", features };
 }
 
 function edgesGeoJson(

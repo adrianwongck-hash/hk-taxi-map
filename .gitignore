@@ -18,3 +18,5 @@ bun.lockb
 .turbo/
 coverage/
 .vercel
+src/data/generated/highways.raw.json
+src/data/generated/hong-kong.osm.pbf
