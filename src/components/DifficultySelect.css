@@ -1,0 +1,79 @@
+.difficulty-select__back {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 0.35rem 0.65rem;
+  margin-bottom: 0.85rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.difficulty-select__grid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+@media (min-width: 640px) {
+  .difficulty-select__grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.difficulty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.55rem;
+  text-align: left;
+  padding: 1.15rem 1rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: inherit;
+  cursor: pointer;
+  min-height: 9.5rem;
+}
+
+.difficulty-card--normal {
+  border-color: color-mix(in srgb, #2e7d32 40%, var(--border));
+  background: color-mix(in srgb, #2e7d32 8%, var(--surface));
+}
+
+.difficulty-card--hard {
+  border-color: color-mix(in srgb, #c62828 40%, var(--border));
+  background: color-mix(in srgb, #c62828 8%, var(--surface));
+}
+
+.difficulty-card strong {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 1.15rem;
+}
+
+.difficulty-card strong span {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.difficulty-card p {
+  margin: 0;
+  flex: 1;
+  color: var(--muted);
+  line-height: 1.4;
+  font-size: 0.92rem;
+}
+
+.difficulty-card__cta {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.difficulty-card:hover,
+.difficulty-card:focus-visible {
+  outline: none;
+  transform: translateY(-1px);
+}

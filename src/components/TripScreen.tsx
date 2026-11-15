@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { Difficulty } from "../game/difficulty";
+import { DIFFICULTIES } from "../game/difficulty";
 import { MODES } from "../game/modes";
 import {
   calculateFare,
+  autoContinueEdge,
+  extendForcedPath,
   formatHkd,
   generateTrip,
-  outgoingEdges,
+  pathLengthM,
+  decisionChoices,
   scoreTrip,
+  tripBetweenLandmarks,
   type EdgeId,
   type GraphEdge,
   type NodeId,
@@ -18,29 +24,55 @@ import "./TripScreen.css";
 
 interface Props {
   mode: TaxiMode;
+  difficulty: Difficulty;
   graph: RoadGraph;
   onExit: () => void;
 }
 
 type Phase = "drive" | "debrief";
 
-export function TripScreen({ mode, graph, onExit }: Props) {
+interface Checkpoint {
+  node: NodeId;
+  arrivedVia: EdgeId | null;
+  playerEdges: EdgeId[];
+}
+
+function forcedTripFromUrl(
+  graph: RoadGraph,
+  mode: TaxiMode,
+): ReturnType<typeof tripBetweenLandmarks> {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  const from = params.get("from");
+  const to = params.get("to");
+  if (!from || !to) return null;
+  return tripBetweenLandmarks(graph, mode, from, to);
+}
+
+export function TripScreen({ mode, difficulty, graph, onExit }: Props) {
   const modeInfo = MODES.find((m) => m.id === mode)!;
+  const difficultyInfo = DIFFICULTIES.find((d) => d.id === difficulty)!;
+  const canUndo = difficulty === "normal";
   const [seed, setSeed] = useState(() => Date.now());
-  const trip = useMemo(
-    () => generateTrip(graph, mode, seed, 800),
-    [graph, mode, seed],
-  );
+  const trip = useMemo(() => {
+    const forced = forcedTripFromUrl(graph, mode);
+    if (forced) return forced;
+    return generateTrip(graph, mode, seed, 800);
+  }, [graph, mode, seed]);
 
   const [currentNode, setCurrentNode] = useState<NodeId | null>(null);
   const [arrivedVia, setArrivedVia] = useState<EdgeId | null>(null);
   const [playerEdges, setPlayerEdges] = useState<EdgeId[]>([]);
+  const [history, setHistory] = useState<Checkpoint[]>([]);
   const [phase, setPhase] = useState<Phase>("drive");
   const [score, setScore] = useState<TripScore | null>(null);
   const [moving, setMoving] = useState(false);
   const [moveProgress, setMoveProgress] = useState(0);
-  const [activeEdge, setActiveEdge] = useState<GraphEdge | null>(null);
+  const [activePath, setActivePath] = useState<GraphEdge[]>([]);
   const animRef = useRef<number | null>(null);
+  const chooseRef = useRef<(edge: GraphEdge, opts?: { auto?: boolean }) => void>(
+    () => {},
+  );
 
   useEffect(() => {
     if (!trip) {
@@ -50,11 +82,12 @@ export function TripScreen({ mode, graph, onExit }: Props) {
     setCurrentNode(trip.origin.nodeId);
     setArrivedVia(null);
     setPlayerEdges([]);
+    setHistory([]);
     setPhase("drive");
     setScore(null);
     setMoving(false);
     setMoveProgress(0);
-    setActiveEdge(null);
+    setActivePath([]);
   }, [trip]);
 
   useEffect(() => {
@@ -62,6 +95,98 @@ export function TripScreen({ mode, graph, onExit }: Props) {
       if (animRef.current !== null) cancelAnimationFrame(animRef.current);
     };
   }, []);
+
+  function choose(edge: GraphEdge, opts?: { auto?: boolean }) {
+    const active = trip;
+    if (!active || moving || !currentNode) return;
+
+    // Only player junction picks create undo checkpoints (Normal).
+    if (canUndo && !opts?.auto) {
+      setHistory((h) => [
+        ...h,
+        {
+          node: currentNode,
+          arrivedVia,
+          playerEdges,
+        },
+      ]);
+    }
+
+    const chain = extendForcedPath(
+      graph,
+      mode,
+      edge,
+      active.destination.nodeId,
+    );
+    const nextEdges = [...playerEdges, ...chain.map((e) => e.id)];
+    setPlayerEdges(nextEdges);
+    setActivePath(chain);
+    setMoving(true);
+    setMoveProgress(0);
+
+    const totalM = pathLengthM(chain);
+    const durationMs = Math.min(4200, Math.max(650, totalM * 0.4));
+    const start = performance.now();
+    const last = chain[chain.length - 1]!;
+
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / durationMs);
+      const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      setMoveProgress(eased);
+      if (t < 1) {
+        animRef.current = requestAnimationFrame(tick);
+      } else {
+        animRef.current = null;
+        setCurrentNode(last.to);
+        setArrivedVia(last.id);
+        setMoving(false);
+        setMoveProgress(1);
+        setActivePath([]);
+        if (last.to === active.destination.nodeId) {
+          const result = scoreTrip(
+            graph,
+            mode,
+            nextEdges,
+            active.optimal.edgeIds,
+          );
+          setScore(result);
+          setPhase("debrief");
+        }
+      }
+    };
+    animRef.current = requestAnimationFrame(tick);
+  }
+
+  chooseRef.current = choose;
+
+  function undo() {
+    if (!canUndo || history.length === 0) return;
+    if (animRef.current !== null) {
+      cancelAnimationFrame(animRef.current);
+      animRef.current = null;
+    }
+    const prev = history[history.length - 1]!;
+    setHistory((h) => h.slice(0, -1));
+    setCurrentNode(prev.node);
+    setArrivedVia(prev.arrivedVia);
+    setPlayerEdges(prev.playerEdges);
+    setMoving(false);
+    setMoveProgress(0);
+    setActivePath([]);
+    setScore(null);
+    setPhase("drive");
+  }
+
+  // Auto-drive through shape points and unique “go straight” corridors.
+  useEffect(() => {
+    if (!trip || !currentNode || moving || phase !== "drive") return;
+    const next = autoContinueEdge(graph, mode, currentNode, arrivedVia);
+    if (!next) return;
+    const id = requestAnimationFrame(() =>
+      chooseRef.current(next, { auto: true }),
+    );
+    return () => cancelAnimationFrame(id);
+  }, [trip, currentNode, arrivedVia, moving, phase, graph, mode]);
 
   if (!trip) {
     return (
@@ -94,54 +219,17 @@ export function TripScreen({ mode, graph, onExit }: Props) {
   );
   const arrivedEdge = arrivedVia ? (graph.edges[arrivedVia] ?? null) : null;
   const choices: GraphEdge[] =
-    phase === "drive" && !moving
-      ? outgoingEdges(graph, mode, currentNode, arrivedVia)
+    phase === "drive" &&
+    !moving &&
+    !autoContinueEdge(graph, mode, currentNode, arrivedVia)
+      ? decisionChoices(graph, mode, currentNode, arrivedVia)
       : [];
-
-  function choose(edge: GraphEdge) {
-    const active = trip;
-    if (!active || moving) return;
-
-    const nextEdges = [...playerEdges, edge.id];
-    setPlayerEdges(nextEdges);
-    setActiveEdge(edge);
-    setMoving(true);
-    setMoveProgress(0);
-
-    const durationMs = Math.min(2800, Math.max(900, edge.lengthM * 0.9));
-    const start = performance.now();
-
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / durationMs);
-      const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-      setMoveProgress(eased);
-      if (t < 1) {
-        animRef.current = requestAnimationFrame(tick);
-      } else {
-        animRef.current = null;
-        setCurrentNode(edge.to);
-        setArrivedVia(edge.id);
-        setMoving(false);
-        setMoveProgress(1);
-        setActiveEdge(null);
-        if (edge.to === active.destination.nodeId) {
-          const result = scoreTrip(
-            graph,
-            mode,
-            nextEdges,
-            active.optimal.edgeIds,
-          );
-          setScore(result);
-          setPhase("debrief");
-        }
-      }
-    };
-    animRef.current = requestAnimationFrame(tick);
-  }
 
   function nextTrip() {
     setSeed(Date.now());
   }
+
+  const undoEnabled = canUndo && history.length > 0 && !moving;
 
   return (
     <div className="trip trip--drive">
@@ -152,6 +240,22 @@ export function TripScreen({ mode, graph, onExit }: Props) {
         <div className="trip__badge" style={{ background: modeInfo.color }}>
           {modeInfo.titleEn}
         </div>
+        <div
+          className={`trip__diff trip__diff--${difficulty}`}
+          title={difficultyInfo.blurb}
+        >
+          {difficultyInfo.titleEn}
+        </div>
+        {canUndo && (
+          <button
+            type="button"
+            className="trip__undo"
+            disabled={!undoEnabled}
+            onClick={undo}
+          >
+            Undo
+          </button>
+        )}
         <div className="trip__meter" aria-live="polite">
           <span className="trip__meter-label">Meter</span>
           <strong>{formatHkd(liveFare.totalHkd)}</strong>
@@ -170,6 +274,7 @@ export function TripScreen({ mode, graph, onExit }: Props) {
 
       <MapDriveView
         graph={graph}
+        mode={mode}
         currentNode={currentNode}
         destinationNode={trip.destination.nodeId}
         modeColor={modeInfo.color}
@@ -179,10 +284,10 @@ export function TripScreen({ mode, graph, onExit }: Props) {
         traversed={playerEdges}
         moving={moving}
         moveProgress={moveProgress}
-        activeEdge={activeEdge}
+        activePath={activePath}
         phase={phase}
         optimalEdgeIds={trip.optimal.edgeIds}
-        onChoose={choose}
+        onChoose={(edge) => choose(edge)}
       />
 
       {phase === "debrief" && score && (
@@ -230,6 +335,11 @@ export function TripScreen({ mode, graph, onExit }: Props) {
             Amber = your route · Green = shortest legal path
           </p>
           <div className="trip__actions">
+            {canUndo && history.length > 0 && (
+              <button type="button" onClick={undo}>
+                Undo last turn
+              </button>
+            )}
             <button type="button" className="trip__primary" onClick={nextTrip}>
               Next trip
             </button>

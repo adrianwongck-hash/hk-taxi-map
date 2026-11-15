@@ -36,6 +36,44 @@
   border-radius: 999px;
 }
 
+.trip__diff {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.3rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.trip__diff--normal {
+  border-color: color-mix(in srgb, #2e7d32 45%, var(--border));
+  color: #1b5e20;
+  background: color-mix(in srgb, #2e7d32 12%, var(--surface));
+}
+
+.trip__diff--hard {
+  border-color: color-mix(in srgb, #c62828 45%, var(--border));
+  color: #b71c1c;
+  background: color-mix(in srgb, #c62828 12%, var(--surface));
+}
+
+.trip__undo {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 0.35rem 0.65rem;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.trip__undo:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .trip__meter {
   margin-left: auto;
   display: flex;

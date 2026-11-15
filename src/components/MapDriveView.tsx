@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Marker,
   Map as MapLibreMap,
@@ -9,18 +9,20 @@ import {
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   classifyTurn,
-  compassLabel,
   edgeBearing,
   headingAtNode,
   relativeTurnDeg,
   turnLabel,
 } from "../game/bearing";
-import type { GraphEdge, NodeId, RoadGraph } from "../sim/types";
-import { choiceAccent } from "./JunctionMinimap";
+import { bestRoadNameAlong, displayRoadName } from "../game/roadName";
+import { extendForcedPath, pathLengthM, positionAlongPath } from "../sim";
+import type { GraphEdge, NodeId, RoadGraph, TaxiMode } from "../sim/types";
+import { JunctionMinimap, choiceAccent } from "./JunctionMinimap";
 import "./MapDriveView.css";
 
 interface Props {
   graph: RoadGraph;
+  mode: TaxiMode;
   currentNode: NodeId;
   destinationNode: NodeId;
   modeColor: string;
@@ -30,7 +32,7 @@ interface Props {
   traversed: string[];
   moving: boolean;
   moveProgress: number;
-  activeEdge: GraphEdge | null;
+  activePath: GraphEdge[];
   phase: "drive" | "debrief";
   optimalEdgeIds?: string[];
   onChoose: (edge: GraphEdge) => void;
@@ -60,16 +62,43 @@ const MAP_STYLE: StyleSpecification = {
   ],
 };
 
-function placeLabel(graph: RoadGraph, nodeId: NodeId): string {
+function placeLabel(graph: RoadGraph, nodeId: NodeId): string | null {
   const node = graph.nodes[nodeId];
   if (node?.nameEn && !/^n\d+$/i.test(node.nameEn)) return node.nameEn;
   const lm = graph.landmarks.find((l) => l.nodeId === nodeId);
   if (lm) return lm.nameEn;
-  return "ahead";
+  return null;
+}
+
+function pathCoords(
+  graph: RoadGraph,
+  edges: GraphEdge[],
+): [number, number][] {
+  const coords: [number, number][] = [];
+  for (const edge of edges) {
+    const a = graph.nodes[edge.from];
+    const b = graph.nodes[edge.to];
+    if (!a || !b) continue;
+    if (coords.length === 0) coords.push([a.lng, a.lat]);
+    coords.push([b.lng, b.lat]);
+  }
+  return coords;
+}
+
+/** Point + bearing a fraction of the way along an edge chain. */
+function pointAlongEdges(
+  graph: RoadGraph,
+  edges: GraphEdge[],
+  fraction: number,
+): { lng: number; lat: number; bearing: number } | null {
+  if (edges.length === 0) return null;
+  const pos = positionAlongPath(graph, edges, fraction);
+  return { lng: pos.lng, lat: pos.lat, bearing: pos.bearing };
 }
 
 export function MapDriveView({
   graph,
+  mode,
   currentNode,
   destinationNode,
   modeColor,
@@ -79,7 +108,7 @@ export function MapDriveView({
   traversed,
   moving,
   moveProgress,
-  activeEdge,
+  activePath,
   phase,
   optimalEdgeIds = [],
   onChoose,
@@ -87,12 +116,22 @@ export function MapDriveView({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const taxiMarkerRef = useRef<Marker | null>(null);
+  const destMarkerRef = useRef<Marker | null>(null);
+  const choiceMarkersRef = useRef<Marker[]>([]);
   const readyRef = useRef(false);
+  const [mapReady, setMapReady] = useState(false);
+  const onChooseRef = useRef(onChoose);
+  onChooseRef.current = onChoose;
+
+  const along =
+    moving && activePath.length > 0
+      ? positionAlongPath(graph, activePath, moveProgress)
+      : null;
 
   const heading = useMemo(() => {
-    const fallback = choices[0] ?? activeEdge;
+    const fallback = choices[0] ?? activePath[activePath.length - 1] ?? null;
     return headingAtNode(graph, arrivedVia, fallback);
-  }, [graph, arrivedVia, choices, activeEdge]);
+  }, [graph, arrivedVia, choices, activePath]);
 
   const arrowChoices = useMemo(() => {
     const sorted = choices
@@ -100,17 +139,26 @@ export function MapDriveView({
         const bearing = edgeBearing(graph, edge);
         const rel = relativeTurnDeg(heading, bearing);
         const kind = classifyTurn(rel);
-        const toward = graph.nodes[edge.to];
-        const towardEn = placeLabel(graph, edge.to);
+        const chain = extendForcedPath(graph, mode, edge, destinationNode);
+        const roadEn = bestRoadNameAlong(chain);
+        const endLabel = placeLabel(graph, chain[chain.length - 1]!.to);
+        // Only keep a place hint when it adds something the road name doesn't.
+        const placeHint =
+          endLabel &&
+          endLabel.toLowerCase() !== roadEn.toLowerCase() &&
+          !/^ahead$/i.test(endLabel)
+            ? endLabel
+            : null;
         return {
           edge,
+          chain,
           rel,
           kind,
           bearing,
-          towardEn,
-          towardZh: toward?.nameZh,
           action: turnLabel(kind),
-          compass: compassLabel(bearing),
+          lengthM: pathLengthM(chain),
+          roadEn,
+          placeHint,
         };
       })
       .sort((a, b) => a.rel - b.rel);
@@ -119,24 +167,15 @@ export function MapDriveView({
       ...c,
       index,
       accent: choiceAccent(index),
+      letter: String.fromCharCode(65 + index),
     }));
-  }, [choices, graph, heading]);
+  }, [choices, graph, heading, mode, destinationNode]);
 
   const taxiLngLat = useMemo((): [number, number] => {
-    if (moving && activeEdge) {
-      const a = graph.nodes[activeEdge.from];
-      const b = graph.nodes[activeEdge.to];
-      if (a && b) {
-        const t = moveProgress;
-        return [
-          a.lng + (b.lng - a.lng) * t,
-          a.lat + (b.lat - a.lat) * t,
-        ];
-      }
-    }
+    if (along) return [along.lng, along.lat];
     const n = graph.nodes[currentNode];
     return n ? [n.lng, n.lat] : [114.1694, 22.3193];
-  }, [moving, activeEdge, moveProgress, graph, currentNode]);
+  }, [along, graph, currentNode]);
 
   // Init map once
   useEffect(() => {
@@ -156,7 +195,6 @@ export function MapDriveView({
     const el = document.createElement("div");
     el.className = "map-taxi";
     el.style.setProperty("--taxi", modeColor);
-    // Viewport-aligned: nose always toward top of screen; map bearing does the rotating.
     const marker = new Marker({
       element: el,
       rotationAlignment: "viewport",
@@ -167,99 +205,195 @@ export function MapDriveView({
       .addTo(map);
     taxiMarkerRef.current = marker;
 
+    const destEl = document.createElement("div");
+    destEl.className = "map-dest";
+    destEl.innerHTML =
+      '<span class="map-dest__pin" aria-hidden="true"></span>' +
+      '<span class="map-dest__label"></span>';
+    const destNode = graph.nodes[destinationNode];
+    const destMarker = new Marker({
+      element: destEl,
+      anchor: "bottom",
+      pitchAlignment: "viewport",
+      rotationAlignment: "viewport",
+    })
+      .setLngLat(
+        destNode ? [destNode.lng, destNode.lat] : taxiLngLat,
+      )
+      .addTo(map);
+    destMarkerRef.current = destMarker;
+    const destLabelEl = destEl.querySelector(".map-dest__label");
+    if (destLabelEl) destLabelEl.textContent = destinationLabel;
+
     const resize = () => map.resize();
     map.on("load", () => {
       readyRef.current = true;
+      setMapReady(true);
       resize();
-      ensureLayers(map, graph);
-      updateLayers(map, graph, {
+      ensureLayers(map);
+      updateLayers(map, graph, layerStateFrom(
         traversed,
-        choices: arrowChoices.map((c) => ({
-          edge: c.edge,
-          accent: c.accent,
-          index: c.index,
-        })),
+        arrowChoices,
         destinationNode,
-        optimalEdgeIds: phase === "debrief" ? optimalEdgeIds : [],
-      });
+        destinationLabel,
+        phase === "debrief" ? optimalEdgeIds : [],
+        activePath,
+      ));
     });
     map.on("error", (e) => {
       console.error("MapLibre error", e.error);
     });
-    // Layout can settle after first paint
     requestAnimationFrame(resize);
     window.addEventListener("resize", resize);
 
     return () => {
       window.removeEventListener("resize", resize);
+      for (const m of choiceMarkersRef.current) m.remove();
+      choiceMarkersRef.current = [];
       marker.remove();
+      destMarker.remove();
       map.remove();
       mapRef.current = null;
       taxiMarkerRef.current = null;
+      destMarkerRef.current = null;
       readyRef.current = false;
+      setMapReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once
   }, []);
 
-  // Taxi colour
   useEffect(() => {
     const el = taxiMarkerRef.current?.getElement();
     el?.style.setProperty("--taxi", modeColor);
   }, [modeColor]);
 
-  // Move taxi + rotate map so travel direction is screen-up (nose to top)
+  // Keep destination pin on the map at the landmark coordinates.
+  useEffect(() => {
+    const marker = destMarkerRef.current;
+    const node = graph.nodes[destinationNode];
+    if (!marker || !node) return;
+    marker.setLngLat([node.lng, node.lat]);
+    const labelEl = marker.getElement().querySelector(".map-dest__label");
+    if (labelEl) labelEl.textContent = destinationLabel;
+  }, [graph, destinationNode, destinationLabel]);
+
+  // Letter+arrow markers on each choice corridor (HTML — always visible).
+  useEffect(() => {
+    const map = mapRef.current;
+    for (const m of choiceMarkersRef.current) m.remove();
+    choiceMarkersRef.current = [];
+    if (!map || !mapReady) return;
+    if (phase !== "drive" || moving || arrowChoices.length === 0) return;
+
+    for (const c of arrowChoices) {
+      const alongM = Math.min(55, Math.max(18, pathLengthM(c.chain) * 0.35));
+      const frac = Math.min(0.7, alongM / Math.max(pathLengthM(c.chain), 1));
+      const tip =
+        pointAlongEdges(graph, c.chain, frac) ??
+        pointAlongEdges(graph, [c.edge], 0.6);
+      if (!tip) continue;
+
+      const el = document.createElement("button");
+      el.type = "button";
+      el.className = "map-choice-arrow";
+      el.style.setProperty("--accent", c.accent);
+      el.setAttribute("aria-label", `Option ${c.letter}: ${c.action}`);
+      el.innerHTML =
+        `<span class="map-choice-arrow__badge">${c.letter}</span>` +
+        `<span class="map-choice-arrow__shaft" aria-hidden="true"></span>`;
+      el.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        onChooseRef.current(c.edge);
+      });
+
+      const marker = new Marker({
+        element: el,
+        anchor: "center",
+        rotationAlignment: "map",
+        pitchAlignment: "map",
+      })
+        .setLngLat([tip.lng, tip.lat])
+        .setRotation(tip.bearing)
+        .addTo(map);
+      choiceMarkersRef.current.push(marker);
+    }
+
+    return () => {
+      for (const m of choiceMarkersRef.current) m.remove();
+      choiceMarkersRef.current = [];
+    };
+  }, [graph, arrowChoices, phase, moving, mapReady]);
+
+  // Keep taxi on the driven polyline; snap while moving, ease when stopped.
   useEffect(() => {
     const map = mapRef.current;
     const marker = taxiMarkerRef.current;
     if (!map || !marker) return;
 
-    const travelBearing =
-      moving && activeEdge ? edgeBearing(graph, activeEdge) : heading;
-
+    const travelBearing = moving && along ? along.bearing : heading;
     marker.setLngLat(taxiLngLat);
     marker.setRotation(0);
 
-    map.easeTo({
-      center: taxiLngLat,
-      bearing: travelBearing,
-      zoom: Math.max(map.getZoom(), moving ? 15.6 : 15.1),
-      duration: moving ? 90 : 420,
-      essential: true,
-    });
-  }, [taxiLngLat, moving, activeEdge, graph, heading]);
+    if (moving) {
+      map.jumpTo({
+        center: taxiLngLat,
+        bearing: travelBearing,
+        zoom: Math.max(map.getZoom(), 15.6),
+      });
+    } else {
+      map.easeTo({
+        center: taxiLngLat,
+        bearing: travelBearing,
+        zoom: Math.max(map.getZoom(), 15.1),
+        duration: 420,
+        essential: true,
+      });
+    }
+  }, [taxiLngLat, moving, along, heading]);
 
-  // Graph layers
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !readyRef.current) return;
-    ensureLayers(map, graph);
-    updateLayers(map, graph, {
-      traversed,
-      choices: arrowChoices.map((c) => ({
-        edge: c.edge,
-        accent: c.accent,
-        index: c.index,
-      })),
-      destinationNode,
-      optimalEdgeIds: phase === "debrief" ? optimalEdgeIds : [],
-    });
+    ensureLayers(map);
+    updateLayers(
+      map,
+      graph,
+      layerStateFrom(
+        traversed,
+        arrowChoices,
+        destinationNode,
+        destinationLabel,
+        phase === "debrief" ? optimalEdgeIds : [],
+        activePath,
+      ),
+    );
   }, [
     graph,
     traversed,
     arrowChoices,
     destinationNode,
+    destinationLabel,
     optimalEdgeIds,
     phase,
+    activePath,
   ]);
 
   return (
     <div className="map-drive">
       <div ref={containerRef} className="map-drive__canvas" />
 
-      <div className="map-drive__dest">
-        <span>Destination</span>
-        <strong>{destinationLabel}</strong>
-      </div>
+      {phase === "drive" && !moving && arrowChoices.length > 0 && (
+        <JunctionMinimap
+          graph={graph}
+          currentNode={currentNode}
+          headingDeg={heading}
+          choices={arrowChoices.map((c) => ({
+            edge: c.edge,
+            index: c.index,
+            accent: c.accent,
+          }))}
+        />
+      )}
 
       {phase === "drive" && !moving && arrowChoices.length > 0 && (
         <div
@@ -275,40 +409,68 @@ export function MapDriveView({
               style={{ ["--accent" as string]: c.accent }}
               onClick={() => onChoose(c.edge)}
             >
-              <span className="map-drive__letter">
-                {String.fromCharCode(65 + c.index)}
+              <span className="map-drive__choice-top">
+                <span className="map-drive__letter">{c.letter}</span>
+                <span className="map-drive__action">{c.action}</span>
               </span>
-              <span className="map-drive__action">{c.action}</span>
-              <span className="map-drive__road">{c.edge.nameEn}</span>
-              <span className="map-drive__toward">
-                toward {c.towardEn}
-                {c.towardZh ? ` · ${c.towardZh}` : ""}
-              </span>
+              <span className="map-drive__road">{c.roadEn}</span>
+              {c.placeHint && (
+                <span className="map-drive__toward">{c.placeHint}</span>
+              )}
               <span className="map-drive__meta">
-                {c.compass} · {(c.edge.lengthM / 1000).toFixed(2)} km
+                {(c.lengthM / 1000).toFixed(2)} km
               </span>
             </button>
           ))}
         </div>
       )}
 
-      {moving && activeEdge && (
+      {moving && activePath.length > 0 && (
         <div className="map-drive__moving" aria-live="polite">
-          {activeEdge.nameEn} →{" "}
-          {graph.nodes[activeEdge.to]?.nameEn ?? ""}
+          {displayRoadName((along?.edge ?? activePath[0])!.nameEn)}
         </div>
       )}
     </div>
   );
 }
 
-function ensureLayers(map: MapLibreMap, _graph: RoadGraph) {
-  // Basemap already shows real streets — only overlay route/choices (full highway graph is huge).
+type ChoiceLayer = {
+  edge: GraphEdge;
+  chain: GraphEdge[];
+  accent: string;
+  index: number;
+  letter: string;
+  bearing: number;
+};
+
+function layerStateFrom(
+  traversed: string[],
+  arrowChoices: ChoiceLayer[],
+  destinationNode: NodeId,
+  destinationLabel: string,
+  optimalEdgeIds: string[],
+  activePath: GraphEdge[],
+) {
+  return {
+    traversed,
+    choices: arrowChoices.map((c) => ({
+      edge: c.edge,
+      chain: c.chain,
+      accent: c.accent,
+      index: c.index,
+      letter: c.letter,
+      bearing: c.bearing,
+    })),
+    destinationNode,
+    destinationLabel,
+    optimalEdgeIds,
+    activePath,
+  };
+}
+
+function ensureLayers(map: MapLibreMap) {
   if (!map.getSource("trip-player")) {
-    map.addSource("trip-player", {
-      type: "geojson",
-      data: emptyFc(),
-    });
+    map.addSource("trip-player", { type: "geojson", data: emptyFc() });
     map.addLayer({
       id: "trip-player-line",
       type: "line",
@@ -321,11 +483,22 @@ function ensureLayers(map: MapLibreMap, _graph: RoadGraph) {
     });
   }
 
-  if (!map.getSource("trip-optimal")) {
-    map.addSource("trip-optimal", {
-      type: "geojson",
-      data: emptyFc(),
+  if (!map.getSource("trip-active")) {
+    map.addSource("trip-active", { type: "geojson", data: emptyFc() });
+    map.addLayer({
+      id: "trip-active-line",
+      type: "line",
+      source: "trip-active",
+      paint: {
+        "line-color": "#ff7043",
+        "line-width": 7,
+        "line-opacity": 0.9,
+      },
     });
+  }
+
+  if (!map.getSource("trip-optimal")) {
+    map.addSource("trip-optimal", { type: "geojson", data: emptyFc() });
     map.addLayer({
       id: "trip-optimal-line",
       type: "line",
@@ -340,9 +513,16 @@ function ensureLayers(map: MapLibreMap, _graph: RoadGraph) {
   }
 
   if (!map.getSource("trip-choices")) {
-    map.addSource("trip-choices", {
-      type: "geojson",
-      data: emptyFc(),
+    map.addSource("trip-choices", { type: "geojson", data: emptyFc() });
+    map.addLayer({
+      id: "trip-choices-casing",
+      type: "line",
+      source: "trip-choices",
+      paint: {
+        "line-color": "#111",
+        "line-width": 10,
+        "line-opacity": 0.35,
+      },
     });
     map.addLayer({
       id: "trip-choices-line",
@@ -350,16 +530,24 @@ function ensureLayers(map: MapLibreMap, _graph: RoadGraph) {
       source: "trip-choices",
       paint: {
         "line-color": ["get", "color"],
-        "line-width": 7,
+        "line-width": 6,
         "line-opacity": 0.95,
       },
     });
   }
 
   if (!map.getSource("trip-points")) {
-    map.addSource("trip-points", {
-      type: "geojson",
-      data: emptyFc(),
+    map.addSource("trip-points", { type: "geojson", data: emptyFc() });
+    map.addLayer({
+      id: "trip-dest-halo",
+      type: "circle",
+      source: "trip-points",
+      filter: ["==", ["get", "kind"], "dest"],
+      paint: {
+        "circle-radius": 16,
+        "circle-color": "#111",
+        "circle-opacity": 0.2,
+      },
     });
     map.addLayer({
       id: "trip-dest",
@@ -367,27 +555,10 @@ function ensureLayers(map: MapLibreMap, _graph: RoadGraph) {
       source: "trip-points",
       filter: ["==", ["get", "kind"], "dest"],
       paint: {
-        "circle-radius": 8,
+        "circle-radius": 9,
         "circle-color": "#111",
-        "circle-stroke-width": 2,
+        "circle-stroke-width": 3,
         "circle-stroke-color": "#fff",
-      },
-    });
-    map.addLayer({
-      id: "trip-choice-labels",
-      type: "symbol",
-      source: "trip-points",
-      filter: ["==", ["get", "kind"], "choice"],
-      layout: {
-        "text-field": ["get", "label"],
-        "text-size": 14,
-        "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
-        "text-allow-overlap": true,
-      },
-      paint: {
-        "text-color": "#111",
-        "text-halo-color": ["get", "color"],
-        "text-halo-width": 3,
       },
     });
   }
@@ -398,60 +569,72 @@ function updateLayers(
   graph: RoadGraph,
   state: {
     traversed: string[];
-    choices: { edge: GraphEdge; accent: string; index: number }[];
+    choices: ChoiceLayer[];
     destinationNode: NodeId;
+    destinationLabel: string;
     optimalEdgeIds: string[];
+    activePath: GraphEdge[];
   },
 ) {
   setSource(map, "trip-player", edgesGeoJson(graph, state.traversed));
   setSource(map, "trip-optimal", edgesGeoJson(graph, state.optimalEdgeIds));
-
-  const choiceFc: GeoJSON.FeatureCollection = {
-    type: "FeatureCollection",
-    features: state.choices.map((c) => {
-      const a = graph.nodes[c.edge.from]!;
-      const b = graph.nodes[c.edge.to]!;
-      return {
-        type: "Feature",
-        properties: { color: c.accent, label: String.fromCharCode(65 + c.index) },
-        geometry: {
-          type: "LineString",
-          coordinates: [
-            [a.lng, a.lat],
-            [b.lng, b.lat],
+  setSource(
+    map,
+    "trip-active",
+    state.activePath.length
+      ? {
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              properties: {},
+              geometry: {
+                type: "LineString",
+                coordinates: pathCoords(graph, state.activePath),
+              },
+            },
           ],
-        },
-      };
-    }),
-  };
-  setSource(map, "trip-choices", choiceFc);
+        }
+      : emptyFc(),
+  );
+
+  const choiceLineFeatures: GeoJSON.Feature[] = [];
+
+  for (const c of state.choices) {
+    // Preview only the near stretch so the arrow sits on a clear coloured road.
+    const previewLen = Math.min(120, Math.max(40, pathLengthM(c.chain) * 0.25));
+    let used = 0;
+    const preview: GraphEdge[] = [];
+    for (const e of c.chain) {
+      preview.push(e);
+      used += e.lengthM;
+      if (used >= previewLen) break;
+    }
+    const coords = pathCoords(graph, preview.length ? preview : [c.edge]);
+    if (coords.length >= 2) {
+      choiceLineFeatures.push({
+        type: "Feature",
+        properties: { color: c.accent, label: c.letter },
+        geometry: { type: "LineString", coordinates: coords },
+      });
+    }
+  }
+
+  setSource(map, "trip-choices", {
+    type: "FeatureCollection",
+    features: choiceLineFeatures,
+  });
 
   const dest = graph.nodes[state.destinationNode];
   const pointFeatures: GeoJSON.Feature[] = [];
   if (dest) {
     pointFeatures.push({
       type: "Feature",
-      properties: { kind: "dest" },
-      geometry: { type: "Point", coordinates: [dest.lng, dest.lat] },
-    });
-  }
-  for (const c of state.choices) {
-    const b = graph.nodes[c.edge.to];
-    if (!b) continue;
-    pointFeatures.push({
-      type: "Feature",
       properties: {
-        kind: "choice",
-        label: String.fromCharCode(65 + c.index),
-        color: c.accent,
+        kind: "dest",
+        label: state.destinationLabel,
       },
-      geometry: {
-        type: "Point",
-        coordinates: [
-          (graph.nodes[c.edge.from]!.lng + b.lng) / 2,
-          (graph.nodes[c.edge.from]!.lat + b.lat) / 2,
-        ],
-      },
+      geometry: { type: "Point", coordinates: [dest.lng, dest.lat] },
     });
   }
   setSource(map, "trip-points", {
@@ -478,22 +661,34 @@ function edgesGeoJson(
   edgeIds: string[],
 ): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
+  const coords: [number, number][] = [];
+  let lastTo: string | null = null;
+
   for (const id of edgeIds) {
     const e = graph.edges[id];
     if (!e) continue;
     const a = graph.nodes[e.from];
     const b = graph.nodes[e.to];
     if (!a || !b) continue;
+    if (lastTo !== e.from || coords.length === 0) {
+      if (coords.length >= 2) {
+        features.push({
+          type: "Feature",
+          properties: {},
+          geometry: { type: "LineString", coordinates: coords.slice() },
+        });
+      }
+      coords.length = 0;
+      coords.push([a.lng, a.lat]);
+    }
+    coords.push([b.lng, b.lat]);
+    lastTo = e.to;
+  }
+  if (coords.length >= 2) {
     features.push({
       type: "Feature",
       properties: {},
-      geometry: {
-        type: "LineString",
-        coordinates: [
-          [a.lng, a.lat],
-          [b.lng, b.lat],
-        ],
-      },
+      geometry: { type: "LineString", coordinates: coords.slice() },
     });
   }
   return { type: "FeatureCollection", features };

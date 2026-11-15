@@ -77,8 +77,30 @@ function isOneWay(tags = {}) {
   return "both";
 }
 
+const HIGHWAY_LABELS = {
+  motorway: "Expressway",
+  motorway_link: "Highway ramp",
+  trunk: "Trunk road",
+  trunk_link: "Slip road",
+  primary: "Main road",
+  primary_link: "Slip road",
+  secondary: "Road",
+  secondary_link: "Slip road",
+  tertiary: "Road",
+  tertiary_link: "Slip road",
+  unclassified: "Road",
+  residential: "Local road",
+  living_street: "Local street",
+  service: "Service road",
+  road: "Road",
+};
+
 function roadName(tags = {}) {
-  const en = tags["name:en"] || tags.name || tags.highway || "Road";
+  const raw = tags["name:en"] || tags.name;
+  const en =
+    raw ||
+    HIGHWAY_LABELS[tags.highway] ||
+    (tags.highway ? String(tags.highway).replace(/_/g, " ") : "Road");
   const zh =
     tags["name:zh"] ||
     tags["name:zh-Hant"] ||
@@ -237,36 +259,66 @@ function simplifyGraph(graph) {
     return false;
   };
 
+  const findReverse = (edge) =>
+    (out.get(edge.to) || []).find(
+      (x) => x.to === edge.from && x.nameEn === edge.nameEn,
+    );
+
   for (const e of Object.values(edges)) {
     if (used.has(e.id)) continue;
     if (isChainNode(e.from)) continue;
     used.add(e.id);
+    const rev0 = findReverse(e);
+    if (rev0) used.add(rev0.id);
+
     const chain = [e];
     let cur = e.to;
     let guard = 0;
+    // Two-way roads have continue + reverse at every shape point — ignore reverse.
     while (isChainNode(cur) && guard++ < 8000) {
-      const nexts = (out.get(cur) || []).filter((x) => !used.has(x.id));
+      const prev = chain[chain.length - 1];
+      const nexts = (out.get(cur) || []).filter(
+        (x) => !used.has(x.id) && x.to !== prev.from,
+      );
       if (nexts.length !== 1) break;
       const next = nexts[0];
       if (next.nameEn !== e.nameEn) break;
       chain.push(next);
       used.add(next.id);
+      const rev = findReverse(next);
+      if (rev) used.add(rev.id);
       cur = next.to;
     }
     const first = chain[0];
     const last = chain[chain.length - 1];
-    const id = `s${seq++}`;
-    newEdges[id] = {
-      id,
+    const lengthM =
+      Math.round(chain.reduce((s, x) => s + x.lengthM, 0) * 10) / 10;
+    const forwardId = `s${seq++}`;
+    newEdges[forwardId] = {
+      id: forwardId,
       from: first.from,
       to: last.to,
-      lengthM: Math.round(chain.reduce((s, x) => s + x.lengthM, 0) * 10) / 10,
+      lengthM,
       nameEn: first.nameEn,
       nameZh: first.nameZh,
       taxiTypes: ["red"],
       ...(first.tollHkd != null ? { tollHkd: first.tollHkd } : {}),
       ...(first.flags ? { flags: first.flags } : {}),
     };
+    if (rev0 || chain.some((seg) => findReverse(seg))) {
+      const reverseId = `s${seq++}`;
+      newEdges[reverseId] = {
+        id: reverseId,
+        from: last.to,
+        to: first.from,
+        lengthM,
+        nameEn: first.nameEn,
+        nameZh: first.nameZh,
+        taxiTypes: ["red"],
+        ...(first.tollHkd != null ? { tollHkd: first.tollHkd } : {}),
+        ...(first.flags ? { flags: first.flags } : {}),
+      };
+    }
   }
 
   for (const e of Object.values(edges)) {

@@ -51,3 +51,33 @@ export function generateTrip(
 
   return null;
 }
+
+/** Build a trip between two landmarks by English name (exact or substring). */
+export function tripBetweenLandmarks(
+  graph: RoadGraph,
+  mode: TaxiMode,
+  originName: string,
+  destinationName: string,
+): TripBrief | null {
+  const pool = landmarksForMode(graph, mode);
+  const find = (name: string) => {
+    const q = name.trim().toLowerCase();
+    return (
+      pool.find((l) => l.nameEn.toLowerCase() === q) ??
+      pool.find((l) => l.nameEn.toLowerCase().includes(q))
+    );
+  };
+  const origin = find(originName);
+  const destination = find(destinationName);
+  if (!origin || !destination || origin.nodeId === destination.nodeId) {
+    return null;
+  }
+  const optimal = shortestPath(
+    graph,
+    mode,
+    origin.nodeId,
+    destination.nodeId,
+  );
+  if (!optimal) return null;
+  return { mode, origin, destination, optimal };
+}
